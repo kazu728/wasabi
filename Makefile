@@ -15,11 +15,11 @@ linux-shell: docker-build ## Start an interactive shell in the dev container.
 		$(DOCKER_IMAGE)
 
 .PHONY: qemu-linux
-qemu-linux: docker-build ## Build the UEFI binary, create the ESP, and run QEMU in the container.
-	docker run --rm -it --privileged $(DOCKER_RUN_FLAGS) \
+qemu-linux: docker-build ## Build the UEFI binary, create the ESP, and run QEMU in the container (VNC:5900 exposed).
+	docker run --rm -it --privileged $(DOCKER_RUN_FLAGS) -p 5900:5900 \
 		-v "$(PWD)":/workspace -w /workspace \
 		$(DOCKER_IMAGE) \
-		bash -c 'set -euo pipefail; cargo build --target x86_64-unknown-uefi; $(MAKE) qemu'
+		bash -c 'set -euo pipefail; cargo build --target x86_64-unknown-uefi; make qemu'
 
 .PHONY: linux-test
 linux-test: docker-build ## Run cargo test inside the dev container.
@@ -34,10 +34,10 @@ uefi-esp: ## Create a FAT ESP with the built UEFI binary at EFI/BOOT/BOOTX64.EFI
 	cp target/x86_64-unknown-uefi/debug/wasabi.efi $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 
 .PHONY: qemu
-qemu: uefi-esp ## Run QEMU with OVMF and headless serial output.
+qemu: uefi-esp ## Run QEMU with OVMF, VNC (localhost:5900), VGA device, serial+monitor on stdio.
 	QEMU_AUDIO_DRV=none qemu-system-x86_64 \
 		-bios third_party/ovmf/RELEASEX64_OVMF.fd \
 		-M q35 -m 2G -smp 4 \
 		-accel tcg,thread=multi \
 		-drive format=raw,file=fat:rw:$(ESP_DIR),if=ide,media=disk \
-		-nographic -serial mon:stdio
+		-device VGA -display none -vnc :0,password=on -serial mon:stdio
