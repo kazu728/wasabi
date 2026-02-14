@@ -3,10 +3,12 @@
 
 use core::arch::asm;
 use core::cmp::min;
+use core::fmt::Write;
 use core::mem::offset_of;
 use core::mem::size_of;
 use core::panic::PanicInfo;
 use core::ptr::null_mut;
+use core::writeln;
 
 type EfiVoid = u8;
 type EfiHandle = u64;
@@ -26,42 +28,39 @@ pub fn hlt() {
 }
 
 #[no_mangle]
-fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
+fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     let mut vram = init_vram(efi_system_table).expect("Failed to initialize VRAM");
     let vw = vram.width;
     let vh = vram.height;
 
-    fill_rect(&mut vram, 0x00000, 0, 0, vw, vh).unwrap();
-    fill_rect(&mut vram, 0xff0000, 32, 32, 32, 32).unwrap();
-    fill_rect(&mut vram, 0x00ff00, 64, 64, 64, 64).unwrap();
-    fill_rect(&mut vram, 0x0000ff, 128, 128, 128, 128).unwrap();
+    fill_rect(&mut vram, 0x000000, 0, 0, vw, vh).unwrap();
 
-    for i in 0..256 {
-        draw_point(&mut vram, 0x010101 * i as u32, i, i).unwrap();
+    draw_test_pattern(&mut vram);
+
+    let mut w = VramTextWriter::new(&mut vram);
+    for i in 0..4 {
+        writeln!(w, "i ={}", i).unwrap();
     }
 
-    let grid_size: i64 = 32;
-    let rect_size: i64 = grid_size * 8;
+    let mut memory_map = MemoryMapHolder::new();
+    let status = efi_system_table
+        .boot_services
+        .get_memory_map(&mut memory_map);
 
-    for i in (0..=rect_size).step_by(grid_size as usize) {
-        draw_line(&mut vram, 0xff0000, 0, i, rect_size, i).unwrap();
-        draw_line(&mut vram, 0xff0000, i, 0, i, rect_size).unwrap();
+    writeln!(w, "Status: {:?}", status).unwrap();
+
+    let mut total_memory_pages = 0;
+
+    for e in memory_map.iter() {
+        if e.memory_type != EfiMemoryType::CONVENTIONAL_MEMORY {
+            continue;
+        }
+        total_memory_pages += e.number_of_pages;
+        writeln!(w, "{e:?}").unwrap();
     }
 
-    let cx = rect_size / 2;
-    let cy = rect_size / 2;
-
-    for i in (0..=rect_size).step_by(grid_size as usize) {
-        draw_line(&mut vram, 0xffff00, cx, cy, 0, i).unwrap();
-        draw_line(&mut vram, 0x00ffff, cx, cy, i, 0).unwrap();
-        draw_line(&mut vram, 0xff00ff, cx, cy, rect_size, i).unwrap();
-        draw_line(&mut vram, 0xffffff, cx, cy, i, rect_size).unwrap();
-    }
-
-    for (i, c) in "ABCDEF".chars().enumerate() {
-        draw_font_fg(&mut vram, i as i64 * 16 + 256, i as i64 * 16, 0xffffff, c);
-    }
-    draw_str_fg(&mut vram, 256, 256, 0xffffff, "Hello, world!");
+    let total_memory_mib = total_memory_pages * 4096 / 1024 / 1024;
+    writeln!(w, "Total memory: {} MiB", total_memory_mib).unwrap();
 
     loop {
         hlt();
@@ -118,6 +117,54 @@ fn draw_str_fg<T: Bitmap>(buf: &mut T, x: i64, y: i64, color: u32, s: &str) {
     }
 }
 
+struct VramTextWriter<'a> {
+    vram: &'a mut VramBufferInfo,
+    cursor_x: i64,
+    cursor_y: i64,
+}
+
+impl<'a> VramTextWriter<'a> {
+    fn new(vram: &'a mut VramBufferInfo) -> Self {
+        Self {
+            vram,
+            cursor_x: 0,
+            cursor_y: 0,
+        }
+    }
+}
+
+impl core::fmt::Write for VramTextWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+            if c == '\n' {
+                self.cursor_x = 0;
+                self.cursor_y += 16;
+            } else {
+                draw_font_fg(self.vram, self.cursor_x, self.cursor_y, 0xffffff, c);
+                self.cursor_x += 8;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn exit_from_efi_boot_services(
+    image_handle: EfiHandle,
+    efi_system_table: &EfiSystemTable,
+    memory_map: &mut MemoryMapHolder,
+) {
+    loop {
+        let status = efi_system_table.boot_services.get_memory_map(memory_map);
+        assert_eq!(status, EfiStatus::Success);
+
+        let status =
+            (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);
+        if status == EfiStatus::Success {
+            break;
+        }
+    }
+}
+
 // 傾斜のエンドポイントを計算する
 fn calc_slope_endpoint(
     da: i64, // 主軸方向のデルタ
@@ -161,6 +208,30 @@ fn draw_line<T: Bitmap>(buf: &mut T, color: u32, x0: i64, y0: i64, x1: i64, y1: 
         }
     }
     Ok(())
+}
+
+fn draw_test_pattern<T: Bitmap>(buf: &mut T) {
+    let w = 128;
+    let left = buf.width() - w - 1;
+    let colors = [0x000000, 0xff0000, 0x00ff00, 0x0000ff];
+    let h = 64;
+
+    for (i, c) in colors.iter().enumerate() {
+        let y = i as i64 * h;
+        fill_rect(buf, *c, left, y, h, h).unwrap();
+        fill_rect(buf, !*c, left + h, y, h, h).unwrap();
+    }
+
+    let points = [(0, 0), (0, w), (w, 0), (w, w)];
+
+    for (x0, y0) in points.iter() {
+        for (x1, y1) in points.iter() {
+            draw_line(buf, 0xffffff, left + *x0, *y0, left + *x1, *y1).unwrap();
+        }
+    }
+
+    draw_str_fg(buf, left, h * colors.len() as i64, 0x00ff00, "0123456789");
+    draw_str_fg(buf, left, h * colors.len() as i64 + 16, 0x00ff00, "ABCDEF");
 }
 
 #[panic_handler]
@@ -279,17 +350,137 @@ fn fill_rect<T: Bitmap>(
     Ok(())
 }
 
+// ブート中に使えるサービス関数のテーブル
+// UEFIは既存のポインタ値で関数を呼び出すため、ファームウェアが期待するメモリレイアウトと一致させる
 #[repr(C)]
 struct EfiBootServicesTable {
-    _reserved0: [u64; 40],
+    _reserved0: [u64; 7],
+    get_memory_map: extern "win64" fn(
+        memory_map_size: *mut usize,
+        memory_map: *mut EfiVoid,
+        map_key: *mut usize,
+        descriptor_size: *mut usize,
+        descriptor_version: *mut u32,
+    ) -> EfiStatus,
+    _reserved1: [u64; 21],
+    exit_boot_services: extern "win64" fn(image_handle: EfiHandle, map_key: usize) -> EfiStatus,
+    _reserved4: [u64; 10],
     locate_protocol: extern "win64" fn(
         protocol: *const EfiGuid,
         registration: *const EfiVoid,
         interface: *mut *mut EfiVoid,
     ) -> EfiStatus,
 }
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[allow(non_camel_case_types)]
+enum EfiMemoryType {
+    RESERVED = 0,
+    LOADER_CODE,
+    LOADER_DATA,
+    BOOT_SERVICES_CODE,
+    BOOT_SERVICES_DATA,
+    RUNTIME_SERVICES_CODE,
+    RUNTIME_SERVICES_DATA,
+    CONVENTIONAL_MEMORY,
+    UNUSABLE_MEMORY,
+    ACPI_RECLAIM_MEMORY,
+    ACPI_MEMORY_NVS,
+    MEMORY_MAPPED_IO,
+    MEMORY_MAPPED_IO_PORT_SPACE,
+    PAL_CODE,
+    PERSISTENT_MEMORY,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct EfiMemoryDescriptor {
+    memory_type: EfiMemoryType,
+    physical_start: u64,
+    virtual_start: u64,
+    number_of_pages: u64,
+    attribute: u64,
+}
+
+const MEMORY_MAP_BUFFER_SIZE: usize = 0x8000;
+
+// UEFIのGetMemoryMap関数の呼び出しに必要なバッファと関連情報を保持する
+struct MemoryMapHolder {
+    memory_map_buffer: [u8; MEMORY_MAP_BUFFER_SIZE], // GetMemoryMap関数がメモリマップを格納するためのバッファ
+    memory_map_size: usize, // バッファのサイズ、GetMemoryMap関数の呼び出し前に設定する必要がある
+    map_key: usize, // GetMemoryMap関数が返すマップキー、ExitBootServices関数の呼び出しに必要
+    descriptor_size: usize, // 各ディスクリプタのサイズ
+    descriptor_version: u32, // ディスクリプタのバージョン
+}
+
+struct MemoryMapIterator<'a> {
+    map: &'a MemoryMapHolder,
+    offset: usize,
+}
+
+impl<'a> Iterator for MemoryMapIterator<'a> {
+    type Item = &'a EfiMemoryDescriptor;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.map.memory_map_size {
+            return None;
+        } else {
+            let e: &EfiMemoryDescriptor = unsafe {
+                &*(self.map.memory_map_buffer.as_ptr().add(self.offset)
+                    as *const EfiMemoryDescriptor)
+            };
+            self.offset += self.map.descriptor_size;
+            Some(e)
+        }
+    }
+}
+
+impl MemoryMapHolder {
+    pub const fn new() -> Self {
+        Self {
+            memory_map_buffer: [0; MEMORY_MAP_BUFFER_SIZE],
+            memory_map_size: MEMORY_MAP_BUFFER_SIZE,
+            map_key: 0,
+            descriptor_size: 0,
+            descriptor_version: 0,
+        }
+    }
+
+    pub fn iter(&self) -> MemoryMapIterator {
+        MemoryMapIterator {
+            map: self,
+            offset: 0,
+        }
+    }
+}
+
+impl EfiBootServicesTable {
+    fn get_memory_map(&self, map: &mut MemoryMapHolder) -> EfiStatus {
+        (self.get_memory_map)(
+            &mut map.memory_map_size,
+            map.memory_map_buffer.as_mut_ptr(),
+            &mut map.map_key,
+            &mut map.descriptor_size,
+            &mut map.descriptor_version,
+        )
+    }
+
+    fn locate_protocol(
+        &self,
+        protocol: *const EfiGuid,
+        registration: *const EfiVoid,
+        interface: *mut *mut EfiVoid,
+    ) -> EfiStatus {
+        (self.locate_protocol)(protocol, registration, interface)
+    }
+}
+
+const _: () = assert!(offset_of!(EfiBootServicesTable, get_memory_map) == 56);
+const _: () = assert!(offset_of!(EfiBootServicesTable, exit_boot_services) == 232);
 const _: () = assert!(offset_of!(EfiBootServicesTable, locate_protocol) == 320);
 
+// UEFIシステムテーブルの定義、UEFIがエントリポイントに渡す引数の構造体
 #[repr(C)]
 struct EfiSystemTable {
     _reserved0: [u64; 12],
@@ -297,6 +488,7 @@ struct EfiSystemTable {
 }
 const _: () = assert!(offset_of!(EfiSystemTable, boot_services) == 96);
 
+// UEFIのプロトコルを識別するためのGUID構造体と、Graphics Output ProtocolのGUID定数
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct EfiGuid {

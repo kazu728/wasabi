@@ -55,7 +55,7 @@ qemu: uefi-esp ## Run QEMU with OVMF, VNC (localhost:5900), VGA device, serial+m
 # VNC password is configured at startup (no monitor `set_password` needed).
 	QEMU_AUDIO_DRV=none qemu-system-x86_64 \
 		-bios third_party/ovmf/RELEASEX64_OVMF.fd \
-		-M q35 -m 2G -smp 4 \
+		-M q35 -m 4G -smp 4 \
 		-accel tcg,thread=multi \
 		-drive format=raw,file=fat:rw:$(ESP_DIR),if=ide,media=disk \
 		-device VGA -display none \
