@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::arch::asm;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::writeln;
@@ -15,18 +14,11 @@ use wasabi::uefi::EfiMemoryType;
 use wasabi::uefi::EfiSystemTable;
 use wasabi::uefi::MemoryMapHolder;
 use wasabi::uefi::VramTextWriter;
-
-fn hlt() {
-    unsafe {
-        asm!("hlt");
-    }
-}
+use wasabi::x86_64::hlt_loop;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        hlt();
-    }
+    hlt_loop()
 }
 
 #[no_mangle]
@@ -66,7 +58,5 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
 
     exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
 
-    loop {
-        hlt();
-    }
+    hlt_loop();
 }
