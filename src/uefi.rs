@@ -57,7 +57,7 @@ pub enum EfiMemoryType {
 #[derive(Debug)]
 pub struct EfiMemoryDescriptor {
     pub memory_type: EfiMemoryType,
-    physical_start: u64,
+    pub physical_start: u64,
     virtual_start: u64,
     pub number_of_pages: u64,
     attribute: u64,
@@ -245,6 +245,7 @@ pub fn init_vram(efi_system_table: &EfiSystemTable) -> Result<VramBufferInfo> {
     })
 }
 
+// UEFIからOSに制御を移交する
 pub fn exit_from_efi_boot_services(
     image_handle: EfiHandle,
     efi_system_table: &EfiSystemTable,

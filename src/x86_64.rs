@@ -12,6 +12,33 @@ pub fn hlt_loop() -> ! {
     }
 }
 
+pub fn busy_loop_hint() {
+    unsafe { asm!("pause") }
+}
+
+pub fn read_io_port_u8(port: u16) -> u8 {
+    let mut data: u8;
+    unsafe {
+        asm!(
+            "in al, dx",
+            in("dx") port,
+            out("al") data,
+        )
+    }
+    data
+}
+
+// TODO: check
+pub fn write_io_port_u8(port: u16, data: u8) {
+    unsafe {
+        asm!(
+            "out dx, al",
+            in("dx") port,
+            in("al") data,
+        )
+    }
+}
+
 pub unsafe fn outb(port: u16, value: u8) {
     unsafe {
         asm!(
