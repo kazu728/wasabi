@@ -1,6 +1,5 @@
 use crate::qemu::exit_qemu;
 use crate::qemu::QemuExitCode;
-use crate::serial::init_com1;
 use crate::serial::SerialPort;
 use core::any::type_name;
 use core::fmt;
@@ -26,7 +25,6 @@ where
 }
 
 pub fn test_runner(tests: &[&dyn Testable]) {
-    init_com1();
     serial_log(format_args!("running {} tests\n", tests.len()));
     for test in tests {
         test.run();
@@ -42,7 +40,6 @@ fn panic(info: &PanicInfo) -> ! {
 }
 
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
-    init_com1();
     serial_log(format_args!("[failed]\n"));
     serial_log(format_args!("error: {info}\n"));
     serial_log(format_args!("{TEST_RESULT_FAIL_MARKER}\n"));

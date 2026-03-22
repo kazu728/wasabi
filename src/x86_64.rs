@@ -28,7 +28,6 @@ pub fn read_io_port_u8(port: u16) -> u8 {
     data
 }
 
-// TODO: check
 pub fn write_io_port_u8(port: u16, data: u8) {
     unsafe {
         asm!(

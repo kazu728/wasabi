@@ -2,7 +2,7 @@ use crate::x86_64::busy_loop_hint;
 use crate::x86_64::read_io_port_u8;
 use crate::x86_64::write_io_port_u8;
 use core::fmt;
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
 
 const COM1_BASE_PORT: u16 = 0x3f8;
@@ -19,7 +19,11 @@ const MODEM_CONTROL_IRQS_ENABLED_RTS_DSR: u8 = 0x0b;
 const TRANSMIT_HOLDING_REGISTER_EMPTY: u8 = 0x20;
 const BAUD_DIVISOR_115200: u16 = 0x0001;
 
-static COM1_INITIALIZED: AtomicBool = AtomicBool::new(false);
+const COM1_UNINITIALIZED: u8 = 0;
+const COM1_INITIALIZING: u8 = 1;
+const COM1_INITIALIZED: u8 = 2;
+
+static COM1_INIT_STATE: AtomicU8 = AtomicU8::new(COM1_UNINITIALIZED);
 
 pub struct SerialPort {
     base: u16,
@@ -62,7 +66,7 @@ impl SerialPort {
     }
 
     pub fn write_byte(&mut self, byte: u8) {
-        self.assert_initialized_for_write();
+        self.ensure_initialized_for_write();
         self.write_byte_unchecked(byte);
     }
 
@@ -85,20 +89,16 @@ impl SerialPort {
             != 0
     }
 
-    #[track_caller]
-    fn assert_initialized_for_write(&self) {
+    fn ensure_initialized_for_write(&self) {
         if self.base == COM1_BASE_PORT {
-            assert!(
-                COM1_INITIALIZED.load(Ordering::Acquire),
-                "serial::init_com1() must be called before writing to COM1"
-            );
+            ensure_com1_initialized();
         }
     }
 }
 
 impl fmt::Write for SerialPort {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.assert_initialized_for_write();
+        self.ensure_initialized_for_write();
         for byte in s.bytes() {
             self.write_byte_unchecked(byte);
         }
@@ -106,12 +106,29 @@ impl fmt::Write for SerialPort {
     }
 }
 
-pub fn init_com1() {
-    if COM1_INITIALIZED.load(Ordering::Acquire) {
-        return;
+impl Default for SerialPort {
+    fn default() -> Self {
+        Self::new_for_com1()
     }
+}
 
-    let mut port = SerialPort::new_for_com1();
-    port.init();
-    COM1_INITIALIZED.store(true, Ordering::Release);
+pub fn ensure_com1_initialized() {
+    loop {
+        match COM1_INIT_STATE.compare_exchange(
+            COM1_UNINITIALIZED,
+            COM1_INITIALIZING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => {
+                let mut port = SerialPort::new_for_com1();
+                port.init();
+                COM1_INIT_STATE.store(COM1_INITIALIZED, Ordering::Release);
+                return;
+            }
+            Err(COM1_INITIALIZING) => busy_loop_hint(),
+            Err(COM1_INITIALIZED) => return,
+            Err(_) => unreachable!(),
+        }
+    }
 }
