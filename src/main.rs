@@ -10,6 +10,7 @@ use wasabi::graphics::draw_test_pattern;
 use wasabi::graphics::fill_rect;
 use wasabi::info;
 use wasabi::init;
+use wasabi::print::hexdump;
 use wasabi::println;
 use wasabi::uefi::init_vram;
 use wasabi::uefi::EfiHandle;
@@ -58,6 +59,17 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
 
     let total_memory_mib = total_memory_pages * 4096 / 1024 / 1024;
     writeln!(w, "Total memory: {} MiB", total_memory_mib).unwrap();
+
+    let cr3 = wasabi::x86_64::read_cr3();
+    println!("cr3 = {cr3:#p}");
+    let t = Some(unsafe { &*cr3 });
+    println!("{:?}", t);
+    let t = t.and_then(|t| t.next_level(0));
+    println!("{:?}", t);
+    let t = t.and_then(|t| t.next_level(0));
+    println!("{:?}", t);
+    let t = t.and_then(|t| t.next_level(0));
+    println!("{:?}", t);
 
     hlt_loop();
 }
