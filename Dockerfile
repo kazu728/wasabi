@@ -12,6 +12,7 @@ ENV CARGO_HOME=/opt/cargo \
 RUN mkdir -p $CARGO_HOME $RUSTUP_HOME && \
     curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${RUST_TOOLCHAIN} && \
     . "$CARGO_HOME/env" && \
+    cargo install cargo-binutils --version 0.4.0 --locked && \
     rustup component add rust-src llvm-tools-preview --toolchain ${RUST_TOOLCHAIN} && \
     rustup target add x86_64-unknown-uefi --toolchain ${RUST_TOOLCHAIN}
 

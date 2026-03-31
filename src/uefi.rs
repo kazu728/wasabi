@@ -25,6 +25,13 @@ const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data3: [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a],
 };
 
+const EFI_LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
+    data0: 0x5B1B31A1,
+    data1: 0x9562,
+    data2: 0x11d2,
+    data3: [0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+};
+
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[must_use]
 #[repr(u64)]
@@ -127,7 +134,13 @@ pub struct EfiBootServicesTable {
         descriptor_size: *mut usize,
         descriptor_version: *mut u32,
     ) -> EfiStatus,
-    _reserved1: [u64; 21],
+    _reserved2: [u64; 11],
+    handle_protocol: extern "win64" fn(
+        handle: EfiHandle,
+        protocol: *const EfiGuid,
+        interface: *mut *mut EfiVoid,
+    ) -> EfiStatus,
+    _reserved1: [u64; 9],
     exit_boot_services: extern "win64" fn(image_handle: EfiHandle, map_key: usize) -> EfiStatus,
     _reserved4: [u64; 10],
     locate_protocol: extern "win64" fn(
@@ -146,15 +159,6 @@ impl EfiBootServicesTable {
             &mut map.descriptor_size,
             &mut map.descriptor_version,
         )
-    }
-
-    fn locate_protocol(
-        &self,
-        protocol: *const EfiGuid,
-        registration: *const EfiVoid,
-        interface: *mut *mut EfiVoid,
-    ) -> EfiStatus {
-        (self.locate_protocol)(protocol, registration, interface)
     }
 }
 
@@ -205,6 +209,30 @@ pub(crate) fn locate_graphic_protocol<'a>(
 
     if status != EfiStatus::Success {
         return Err("Failed to locate Graphics Output Protocol");
+    }
+
+    Ok(unsafe { &*graphic_output_protocol })
+}
+
+pub struct EfiLoadedImageProtocol {
+    _reserved: [u64; 8],
+    pub image_base: u64,
+    pub image_size: u64,
+}
+
+pub fn locate_loaded_image_protocol<'a>(
+    image_handle: EfiHandle,
+    efi_system_table: &'a EfiSystemTable,
+) -> Result<&'a EfiLoadedImageProtocol> {
+    let mut graphic_output_protocol = null_mut::<EfiLoadedImageProtocol>();
+    let status = (efi_system_table.boot_services.handle_protocol)(
+        image_handle,
+        &EFI_LOADED_IMAGE_PROTOCOL_GUID,
+        &mut graphic_output_protocol as *mut *mut EfiLoadedImageProtocol as *mut *mut EfiVoid,
+    );
+
+    if status != EfiStatus::Success {
+        return Err("Failed to locate Loaded Image Protocol");
     }
 
     Ok(unsafe { &*graphic_output_protocol })

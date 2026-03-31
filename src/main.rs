@@ -10,15 +10,21 @@ use wasabi::graphics::draw_test_pattern;
 use wasabi::graphics::fill_rect;
 use wasabi::info;
 use wasabi::init;
-use wasabi::print::hexdump;
+use wasabi::init::init_paging;
 use wasabi::println;
 use wasabi::uefi::init_vram;
+use wasabi::uefi::locate_loaded_image_protocol;
 use wasabi::uefi::EfiHandle;
 use wasabi::uefi::EfiMemoryType;
 use wasabi::uefi::EfiSystemTable;
 use wasabi::uefi::VramTextWriter;
 use wasabi::warn;
+use wasabi::x86_64::flush_tlb;
 use wasabi::x86_64::hlt_loop;
+use wasabi::x86_64::init_exceptions;
+use wasabi::x86_64::read_cr3;
+use wasabi::x86_64::trigger_debug_interrupt;
+use wasabi::x86_64::PageAttr;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -31,6 +37,12 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     println!("Booting WasabiOS...");
     println!("image_handle: {:018X}", image_handle);
     println!("efi_system_table: {:#p}", efi_system_table);
+
+    let loaded_image_protocol = locate_loaded_image_protocol(image_handle, efi_system_table)
+        .expect("Failed to locate Loaded Image Protocol");
+
+    println!("image_base = {:#018X}", loaded_image_protocol.image_base);
+    println!("image_size = {:#018X}", loaded_image_protocol.image_size);
 
     info!("info");
     warn!("warn");
@@ -70,6 +82,24 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     println!("{:?}", t);
     let t = t.and_then(|t| t.next_level(0));
     println!("{:?}", t);
+
+    let (_gdt, _idt) = init_exceptions();
+    info!("Exceptions initialized");
+    trigger_debug_interrupt();
+    info!("Execution continued after triggering debug interrupt");
+    init_paging(&memory_map);
+    info!("Paging initialized");
+
+    let page_table = read_cr3();
+
+    unsafe {
+        (*page_table)
+            .create_mapping(0, 4096, 0, PageAttr::NotPresent)
+            .expect("Failed to create page mapping");
+    }
+    flush_tlb();
+
+    info!("Reading from memory address 0 should cause a page fault");
 
     hlt_loop();
 }

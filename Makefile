@@ -2,6 +2,8 @@ DOCKER_IMAGE := wasabi-dev:latest
 DOCKER_PLATFORM ?= linux/amd64
 VNC_PORT ?= 5900
 VNC_PASSWORD ?= test
+PROFILE ?= debug
+OBJDUMP_ARGS ?= --disassemble --no-show-raw-insn
 
 .PHONY: docker-build
 docker-build: ## Build the dev container image.
@@ -32,6 +34,18 @@ test: docker-build ## Run cargo test inside the dev container.
 		-v "$(PWD)":/workspace -w /workspace \
 		$(DOCKER_IMAGE) \
 		cargo test
+
+.PHONY: objdump
+objdump: docker-build ## Build the UEFI binary and disassemble it with cargo-objdump in the dev container.
+	docker run --rm -it --privileged --platform=$(DOCKER_PLATFORM) \
+		-v "$(PWD)":/workspace -w /workspace \
+		$(DOCKER_IMAGE) \
+		bash -c 'set -euo pipefail; \
+			args=""; \
+			if [ "$(PROFILE)" = "release" ]; then \
+				args="$$args --release"; \
+			fi; \
+			cargo objdump --target x86_64-unknown-uefi --bin wasabi $$args -- $(OBJDUMP_ARGS)'
 
 .PHONY: vnc-open
 vnc-open: ## Open VNC client to vnc://localhost:5900.
