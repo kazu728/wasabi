@@ -1,9 +1,28 @@
+use crate::graphics::BitmapTextWriter;
+use crate::mutex::Mutex;
 use crate::serial::SerialPort;
+use crate::uefi::VramBufferInfo;
 use core::fmt;
 use core::mem::size_of;
 use core::slice;
 
+static GLOBAL_VRAM_WRITER: Mutex<Option<BitmapTextWriter<VramBufferInfo>>> = Mutex::new(None);
+
+pub fn set_global_vram(vram: VramBufferInfo) {
+    assert!(GLOBAL_VRAM_WRITER.lock().is_none());
+    let w = BitmapTextWriter::new(vram);
+    *GLOBAL_VRAM_WRITER.lock() = Some(w);
+}
+
 pub fn global_print(args: fmt::Arguments) {
+    let mut writer = SerialPort::default();
+    fmt::write(&mut writer, args).unwrap();
+    if let Some(w) = &mut *GLOBAL_VRAM_WRITER.lock() {
+        fmt::write(w, args).unwrap();
+    }
+}
+
+pub fn serial_print(args: fmt::Arguments) {
     let mut writer = SerialPort::default();
     fmt::write(&mut writer, args).unwrap();
 }
@@ -23,6 +42,11 @@ macro_rules! println {
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {$crate::print!("[INFO] {}:{:<3}: {}\n", file!(), line!(), format_args!($($arg)*))};
+}
+
+#[macro_export]
+macro_rules! serial_info {
+    ($($arg:tt)*) => {$crate::print::serial_print(format_args!("[INFO] {}:{:<3}: {}\n", file!(), line!(), format_args!($($arg)*)))};
 }
 
 #[macro_export]

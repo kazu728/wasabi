@@ -8,7 +8,6 @@ use core::task::Poll;
 use core::task::RawWaker;
 use core::task::RawWakerVTable;
 use core::task::Waker;
-use core::time;
 use core::time::Duration;
 
 extern crate alloc;

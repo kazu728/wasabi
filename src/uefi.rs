@@ -1,5 +1,4 @@
 use crate::acpi::AcpiRsdpStruct;
-use crate::graphics::draw_font;
 use crate::graphics::Bitmap;
 use crate::result::Result;
 use core::mem::offset_of;
@@ -323,37 +322,6 @@ pub fn exit_from_efi_boot_services(
         if status == EfiStatus::Success {
             break;
         }
-    }
-}
-
-pub struct VramTextWriter<'a> {
-    vram: &'a mut VramBufferInfo,
-    cursor_x: i64,
-    cursor_y: i64,
-}
-
-impl<'a> VramTextWriter<'a> {
-    pub fn new(vram: &'a mut VramBufferInfo) -> Self {
-        Self {
-            vram,
-            cursor_x: 0,
-            cursor_y: 0,
-        }
-    }
-}
-
-impl core::fmt::Write for VramTextWriter<'_> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for c in s.chars() {
-            if c == '\n' {
-                self.cursor_x = 0;
-                self.cursor_y += 16;
-            } else {
-                draw_font(self.vram, self.cursor_x, self.cursor_y, 0xffffff, c);
-                self.cursor_x += 8;
-            }
-        }
-        Ok(())
     }
 }
 

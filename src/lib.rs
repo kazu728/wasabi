@@ -23,7 +23,8 @@ pub mod x86_64;
 #[cfg(test)]
 #[no_mangle]
 fn efi_main(image_handle: uefi::EfiHandle, efi_system_table: &uefi::EfiSystemTable) {
-    init::init_basic_runtime(image_handle, efi_system_table);
+    let memory_map = init::init_basic_runtime(image_handle, efi_system_table);
+    allocator::ALLOCATOR.init_with_nmap(&memory_map);
 
     // cargo test でコンパイラが #[test_case] を集め、それを実行する関数を自動生成する
     // その関数がtest_main で生成されるため呼出可能

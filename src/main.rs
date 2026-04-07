@@ -1,38 +1,29 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::time::Duration;
-use core::writeln;
-
+use wasabi::allocator::ALLOCATOR;
 use wasabi::error;
-use wasabi::executor::yield_execution;
 use wasabi::executor::Executor;
 use wasabi::executor::Task;
 use wasabi::executor::TimeoutFuture;
-use wasabi::graphics::draw_test_pattern;
-use wasabi::graphics::fill_rect;
 use wasabi::hpet::global_timestamp;
-use wasabi::hpet::set_global_hpet;
-use wasabi::hpet::Hpet;
 use wasabi::info;
-use wasabi::init;
+use wasabi::init::init_allocator;
+use wasabi::init::init_basic_runtime;
+use wasabi::init::init_display;
+use wasabi::init::init_hpet;
 use wasabi::init::init_paging;
+use wasabi::print::set_global_vram;
 use wasabi::println;
 use wasabi::uefi::init_vram;
 use wasabi::uefi::locate_loaded_image_protocol;
 use wasabi::uefi::EfiHandle;
-use wasabi::uefi::EfiMemoryType;
 use wasabi::uefi::EfiSystemTable;
-use wasabi::uefi::VramTextWriter;
 use wasabi::warn;
-use wasabi::x86_64::flush_tlb;
 use wasabi::x86_64::hlt_loop;
 use wasabi::x86_64::init_exceptions;
-use wasabi::x86_64::read_cr3;
-use wasabi::x86_64::trigger_debug_interrupt;
-use wasabi::x86_64::PageAttr;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -57,68 +48,23 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     error!("error");
 
     let mut vram = init_vram(efi_system_table).expect("Failed to initialize VRAM");
-    let vw = vram.width;
-    let vh = vram.height;
+    init_display(&mut vram);
 
-    fill_rect(&mut vram, 0x000000, 0, 0, vw, vh).unwrap();
-
-    draw_test_pattern(&mut vram);
-
-    let mut w = VramTextWriter::new(&mut vram);
+    // let mut w = BitmapTextWriter::new(&mut vram);
+    set_global_vram(vram);
     let acpi = efi_system_table
         .acpi_table()
         .expect("Failed to get ACPI table");
-    let memory_map = init::init_basic_runtime(image_handle, efi_system_table);
+    let memory_map = init_basic_runtime(image_handle, efi_system_table);
+    info!("Hello, Non UEFI world!");
 
-    let mut total_memory_pages = 0;
-
-    for e in memory_map.iter() {
-        if e.memory_type != EfiMemoryType::CONVENTIONAL_MEMORY {
-            continue;
-        }
-        total_memory_pages += e.number_of_pages;
-        writeln!(w, "{e:?}").unwrap();
-    }
-
-    let total_memory_mib = total_memory_pages * 4096 / 1024 / 1024;
-    writeln!(w, "Total memory: {} MiB", total_memory_mib).unwrap();
-
-    let cr3 = wasabi::x86_64::read_cr3();
-    println!("cr3 = {cr3:#p}");
-    let t = Some(unsafe { &*cr3 });
-    println!("{:?}", t);
-    let t = t.and_then(|t| t.next_level(0));
-    println!("{:?}", t);
-    let t = t.and_then(|t| t.next_level(0));
-    println!("{:?}", t);
-    let t = t.and_then(|t| t.next_level(0));
-    println!("{:?}", t);
+    ALLOCATOR.init_with_nmap(&memory_map);
+    init_allocator(&memory_map);
 
     let (_gdt, _idt) = init_exceptions();
-    info!("Exceptions initialized");
-    trigger_debug_interrupt();
-    info!("Execution continued after triggering debug interrupt");
     init_paging(&memory_map);
-    info!("Paging initialized");
 
-    let page_table = read_cr3();
-
-    unsafe {
-        (*page_table)
-            .create_mapping(0, 4096, 0, PageAttr::NotPresent)
-            .expect("Failed to create page mapping");
-    }
-    flush_tlb();
-
-    let hpet = acpi.hpet().expect("Failed to get HPET");
-    let hpet = hpet
-        .base_address()
-        .expect("Failed to get HPET base address");
-
-    info!("HPET is at {:#p}", hpet);
-    let hpet = Hpet::new(hpet);
-
-    set_global_hpet(hpet);
+    init_hpet(acpi);
     let t0 = global_timestamp();
 
     let task1 = Task::new(async move {
